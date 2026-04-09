@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-headline: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-label: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-primary: #003178;
+  --color-primary-container: #0d47a1;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #a1bbff;
+  
+  --color-secondary: #1b6d24;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #a0f399;
+  --color-on-secondary-container: #217128;
+  
+  --color-tertiary: #681700;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #902300;
+  
+  --color-background: #f3faff;
+  --color-on-background: #071e27;
+  
+  --color-surface: #f3faff;
+  --color-on-surface: #071e27;
+  --color-on-surface-variant: #434652;
+  
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #e6f6ff;
+  --color-surface-container: #dbf1fe;
+  --color-surface-container-high: #d5ecf8;
+  --color-surface-container-highest: #cfe6f2;
+  
+  --color-outline: #737783;
+  --color-outline-variant: #c3c6d4;
+  
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface font-body;
+  }
+}
+
+body.theme-night {
+  --color-primary: #8fb7ff;
+  --color-primary-container: #3f6dcc;
+  --color-on-primary: #041020;
+  --color-on-primary-container: #d8e5ff;
+  --color-secondary: #80d28a;
+  --color-on-secondary: #06210c;
+  --color-secondary-container: #1f4b25;
+  --color-on-secondary-container: #d9f7dd;
+  --color-tertiary: #ff9f7d;
+  --color-on-tertiary: #271108;
+  --color-tertiary-container: #7a2c17;
+  --color-background: #0c1520;
+  --color-on-background: #eef4ff;
+  --color-surface: #0c1520;
+  --color-on-surface: #eef4ff;
+  --color-on-surface-variant: #b3c0d4;
+  --color-surface-container-lowest: #131f2d;
+  --color-surface-container-low: #182433;
+  --color-surface-container: #1d2a3b;
+  --color-surface-container-high: #243246;
+  --color-surface-container-highest: #2a3a50;
+  --color-outline: #8ea1bb;
+  --color-outline-variant: #33465e;
+}
+
+.glass-panel {
+  @apply bg-white/70 backdrop-blur-xl border border-white/40;
+}
+
+.clock-gradient {
+  background: linear-gradient(135deg, #003178 0%, #0d47a1 100%);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
