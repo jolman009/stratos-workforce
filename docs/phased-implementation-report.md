@@ -32,35 +32,47 @@ The main gaps are product depth, multi-user realism, domain workflows, and opera
 
 ## Phase 1: Stabilize the Foundation
 
+**Status:** In Progress
+
 ### Timeline
 
 Week 1 to Week 2
 
 ### Objectives
 
-- Reduce architectural friction in the front end
-- Strengthen API contracts and validation
-- Improve developer confidence through better test coverage
+- [ ] Reduce architectural friction in the front end
+- [x] Strengthen API contracts and validation
+- [x] Improve developer confidence through better test coverage
 
 ### Scope
 
-- Split `StratosApp.tsx` into feature modules and route-oriented screens
-- Introduce a front-end API service and feature hooks for clock, time off, notifications, profile, and schedule
-- Add server-side request validation for all targeted endpoints
-- Add API tests for profile, settings, auth, and shift swap flows
-- Standardize error handling and user feedback states
+- [ ] Split `StratosApp.tsx` into feature modules and route-oriented screens
+- [ ] Introduce a front-end API service and feature hooks for clock, time off, notifications, profile, and schedule
+- [x] Add server-side request validation for all targeted endpoints
+- [x] Add API tests for profile, settings, auth, and shift swap flows
+- [x] Standardize error handling and user feedback states
 
 ### Deliverables
 
-- `features/clock`, `features/time-off`, `features/profile`, `features/notifications`
-- Shared API error model and UI banner/toast strategy
-- Expanded API tests and build verification in CI
+- [ ] `features/clock`, `features/time-off`, `features/profile`, `features/notifications`
+- [x] Shared API error model and UI banner/toast strategy
+- [x] Expanded API tests and build verification in CI
 
 ### Success Criteria
 
-- No single front-end file owns the majority of app behavior
-- All targeted API endpoints have direct test coverage
-- Mutation failures produce understandable user-facing feedback
+- [ ] No single front-end file owns the majority of app behavior
+- [x] All targeted API endpoints have direct test coverage
+- [x] Mutation failures produce understandable user-facing feedback
+
+### Phase 1 Assessment Notes
+
+- `StratosApp.tsx` still owns most screen rendering and orchestration logic, so the front-end architecture work is only partially complete.
+- Alerts and profile rendering have been extracted into dedicated screen modules, which reduces some top-level UI ownership without finishing the full screen split.
+- A shared front-end API module and optimistic mutation hook now exist, but the planned feature-specific hook/module split is not complete yet.
+- Server-side validation is in place for the targeted mutation endpoints, and the bulk state write route has been deprecated.
+- API coverage now includes profile, settings, auth, notifications, clock flow, time-off creation, and shift swap creation.
+- GitHub Actions now runs lint, build, and API verification on pushes and pull requests.
+- User-facing mutation failures now surface through a shared inline error banner instead of failing silently.
 
 ## Phase 2: Complete the Employee Workflows
 
