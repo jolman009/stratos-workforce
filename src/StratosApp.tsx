@@ -30,8 +30,8 @@ import { ShiftCard } from './components/ShiftCard';
 import { BalanceCard, RequestItem } from './components/TimeOff';
 import { AppSettings, ClockState, LeaveType, LoginFormState, Notification, PersistedState, Screen, Shift, TimeOffFormState, TimeOffRequest, User } from './types';
 import { BALANCE_LIMITS, BREAK_LIMIT_SECONDS, createDefaultAppState, DEFAULT_LOGIN_FORM, DEFAULT_TIME_OFF_FORM, INITIAL_CLOCK_STATE, INITIAL_SETTINGS, STORAGE_KEY } from './appState';
-
-const API_STATE_ENDPOINT = '/api/state';
+import { fetchPersistedStateFromApi, patchNotificationUnread, patchSessionAuth, patchSettings, patchUserProfile, postClockEvent, postShiftSwapDraft, postTimeOffRequest } from './api/client';
+import { useOptimisticMutation } from './hooks/useOptimisticMutation';
 
 function getPersistedState(): PersistedState | null {
   if (typeof window === 'undefined') {
@@ -43,29 +43,6 @@ function getPersistedState(): PersistedState | null {
     return raw ? (JSON.parse(raw) as PersistedState) : null;
   } catch {
     return null;
-  }
-}
-
-async function fetchPersistedStateFromApi(): Promise<PersistedState> {
-  const response = await fetch(API_STATE_ENDPOINT);
-  if (!response.ok) {
-    throw new Error(`Failed to load app state (${response.status})`);
-  }
-
-  return (await response.json()) as PersistedState;
-}
-
-async function savePersistedStateToApi(state: PersistedState): Promise<void> {
-  const response = await fetch(API_STATE_ENDPOINT, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(state),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to save app state (${response.status})`);
   }
 }
 
@@ -194,6 +171,12 @@ export default function StratosApp() {
     setClockState(state.clockState);
     setLastSubmittedRequestId(state.lastSubmittedRequestId);
   };
+  const { mutationError, setMutationError, runMutation } = useOptimisticMutation({
+    apiStatus,
+    hasLoadedRemote,
+    applyPersistedState,
+    setApiStatus,
+  });
 
   const navigateTo = (screen: Screen) => {
     setCurrentScreen(screen);
@@ -262,32 +245,6 @@ export default function StratosApp() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedRemote) {
-      return;
-    }
-
-    if (apiStatus !== 'online') {
-      return;
-    }
-
-    const persistedState: PersistedState = {
-      isAuthenticated,
-      user,
-      shifts,
-      upcomingShifts,
-      timeOffRequests,
-      notifications,
-      settings,
-      clockState,
-      lastSubmittedRequestId,
-    };
-
-    savePersistedStateToApi(persistedState).catch(() => {
-      setApiStatus('offline');
-    });
-  }, [apiStatus, clockState, hasLoadedRemote, isAuthenticated, lastSubmittedRequestId, notifications, settings, shifts, timeOffRequests, upcomingShifts, user]);
-
-  useEffect(() => {
     document.body.classList.toggle('theme-night', settings.darkMode);
   }, [settings.darkMode]);
 
@@ -348,28 +305,44 @@ export default function StratosApp() {
     Personal: Math.max(BALANCE_LIMITS.Personal - usedDays.Personal, 0),
   };
 
-  const markNotificationRead = (notificationId: string) => {
-    setNotifications((prev) =>
-      prev.map((notification) =>
-        notification.id === notificationId ? { ...notification, unread: false } : notification,
-      ),
-    );
-  };
-
-  const handleClockIn = () => {
-    const nowDate = new Date();
-    setClockState({
-      isClockedIn: true,
-      lastClockInAt: nowDate.toISOString(),
-      lastResumedAt: nowDate.toISOString(),
-      accumulatedWorkSeconds: 0,
-      isBreakActive: false,
-      breakStartedAt: null,
-      accumulatedBreakSeconds: 0,
+  const markNotificationRead = async (notificationId: string) => {
+    await runMutation({
+      request: () => patchNotificationUnread(notificationId, false),
+      fallback: () =>
+        setNotifications((prev) =>
+          prev.map((notification) =>
+            notification.id === notificationId ? { ...notification, unread: false } : notification,
+          ),
+        ),
+      errorMessage: 'Could not update notification state.',
     });
   };
 
-  const handleStartBreak = () => {
+  const mutationBanner = mutationError ? (
+    <div className="mb-6 rounded-xl border border-error/20 bg-error/10 px-4 py-3 text-sm font-medium text-error">
+      {mutationError}
+    </div>
+  ) : null;
+
+  const handleClockIn = async () => {
+    const nowDate = new Date();
+    await runMutation({
+      request: () => postClockEvent('clock-in'),
+      fallback: () =>
+        setClockState({
+          isClockedIn: true,
+          lastClockInAt: nowDate.toISOString(),
+          lastResumedAt: nowDate.toISOString(),
+          accumulatedWorkSeconds: 0,
+          isBreakActive: false,
+          breakStartedAt: null,
+          accumulatedBreakSeconds: 0,
+        }),
+      errorMessage: 'Could not clock in.',
+    });
+  };
+
+  const handleStartBreak = async () => {
     if (!clockState.isClockedIn || clockState.isBreakActive) {
       return;
     }
@@ -377,16 +350,21 @@ export default function StratosApp() {
     const nowIso = new Date().toISOString();
     const workSecondsSinceResume = clockState.lastResumedAt ? getElapsedSeconds(clockState.lastResumedAt) : 0;
 
-    setClockState((prev) => ({
-      ...prev,
-      isBreakActive: true,
-      breakStartedAt: nowIso,
-      lastResumedAt: null,
-      accumulatedWorkSeconds: prev.accumulatedWorkSeconds + workSecondsSinceResume,
-    }));
+    await runMutation({
+      request: () => postClockEvent('break-start'),
+      fallback: () =>
+        setClockState((prev) => ({
+          ...prev,
+          isBreakActive: true,
+          breakStartedAt: nowIso,
+          lastResumedAt: null,
+          accumulatedWorkSeconds: prev.accumulatedWorkSeconds + workSecondsSinceResume,
+        })),
+      errorMessage: 'Could not start break.',
+    });
   };
 
-  const handleStopBreak = () => {
+  const handleStopBreak = async () => {
     if (!clockState.isBreakActive || !clockState.breakStartedAt) {
       return;
     }
@@ -394,16 +372,21 @@ export default function StratosApp() {
     const nowIso = new Date().toISOString();
     const breakSeconds = Math.min(getElapsedSeconds(clockState.breakStartedAt), BREAK_LIMIT_SECONDS);
 
-    setClockState((prev) => ({
-      ...prev,
-      isBreakActive: false,
-      breakStartedAt: null,
-      lastResumedAt: nowIso,
-      accumulatedBreakSeconds: prev.accumulatedBreakSeconds + breakSeconds,
-    }));
+    await runMutation({
+      request: () => postClockEvent('break-stop'),
+      fallback: () =>
+        setClockState((prev) => ({
+          ...prev,
+          isBreakActive: false,
+          breakStartedAt: null,
+          lastResumedAt: nowIso,
+          accumulatedBreakSeconds: prev.accumulatedBreakSeconds + breakSeconds,
+        })),
+      errorMessage: 'Could not stop break.',
+    });
   };
 
-  const handleClockOut = () => {
+  const handleClockOut = async () => {
     const nowDate = new Date();
     const startDate = clockState.lastClockInAt ? new Date(clockState.lastClockInAt) : nowDate;
     const { date, day } = formatShiftDate(startDate);
@@ -420,11 +403,17 @@ export default function StratosApp() {
       teamLeader: currentShift?.teamLeader,
     };
 
-    setShifts((prev) => [completedShift, ...prev].slice(0, 12));
-    setClockState(INITIAL_CLOCK_STATE);
+    await runMutation({
+      request: () => postClockEvent('clock-out'),
+      fallback: () => {
+        setShifts((prev) => [completedShift, ...prev].slice(0, 12));
+        setClockState(INITIAL_CLOCK_STATE);
+      },
+      errorMessage: 'Could not clock out.',
+    });
   };
 
-  const handleLogin = (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!loginForm.employeeId.trim() || !loginForm.password.trim()) {
@@ -433,36 +422,45 @@ export default function StratosApp() {
     }
 
     setLoginError('');
-    setIsAuthenticated(true);
+    setMutationError(null);
+    await runMutation({
+      request: () => patchSessionAuth(true),
+      fallback: () => setIsAuthenticated(true),
+      errorMessage: 'Could not sign in.',
+    });
     setLoginForm(DEFAULT_LOGIN_FORM);
     navigateTo('dashboard');
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    await runMutation({
+      request: () => patchSessionAuth(false),
+      fallback: () => setIsAuthenticated(false),
+      errorMessage: 'Could not log out.',
+    });
     setIsEditingProfile(false);
     setRequestError('');
     navigateTo('login');
   };
 
-  const handleNotificationAction = (notification: Notification) => {
-    markNotificationRead(notification.id);
+  const handleNotificationAction = async (notification: Notification) => {
+    await markNotificationRead(notification.id);
 
     if (notification.action?.type === 'start' && !clockState.isClockedIn) {
-      handleClockIn();
+      await handleClockIn();
     }
 
     navigateTo(notification.action?.targetScreen ?? 'alerts');
   };
 
-  const handleNotificationOpen = (notification: Notification) => {
-    markNotificationRead(notification.id);
+  const handleNotificationOpen = async (notification: Notification) => {
+    await markNotificationRead(notification.id);
     if (notification.action?.targetScreen) {
       navigateTo(notification.action.targetScreen);
     }
   };
 
-  const handleCreateShiftSwap = () => {
+  const handleCreateShiftSwap = async () => {
     const newNotification: Notification = {
       id: `notification-${Date.now()}`,
       type: 'update',
@@ -477,11 +475,15 @@ export default function StratosApp() {
       },
     };
 
-    setNotifications((prev) => [newNotification, ...prev]);
+    await runMutation({
+      request: () => postShiftSwapDraft(),
+      fallback: () => setNotifications((prev) => [newNotification, ...prev]),
+      errorMessage: 'Could not create shift swap draft.',
+    });
     navigateTo('alerts');
   };
 
-  const handleSubmitTimeOffRequest = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmitTimeOffRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!requestForm.startDate || !requestForm.endDate) {
@@ -533,11 +535,48 @@ export default function StratosApp() {
     };
 
     setRequestError('');
-    setTimeOffRequests((prev) => [newRequest, ...prev]);
-    setNotifications((prev) => [approvalNotification, ...prev]);
-    setLastSubmittedRequestId(newRequest.id);
+    setMutationError(null);
+    await runMutation({
+      request: () => postTimeOffRequest(requestForm.type, requestForm.startDate, requestForm.endDate, requestForm.notes),
+      fallback: () => {
+        setTimeOffRequests((prev) => [newRequest, ...prev]);
+        setNotifications((prev) => [approvalNotification, ...prev]);
+        setLastSubmittedRequestId(newRequest.id);
+      },
+      errorMessage: 'Could not submit time off request.',
+    });
     setRequestForm(DEFAULT_TIME_OFF_FORM);
     navigateTo('request-submitted');
+  };
+
+  const handleSaveProfile = async () => {
+    const name = editForm.name.trim() || user.name;
+    const phone = editForm.phone.trim() || user.phone;
+
+    await runMutation({
+      request: () => patchUserProfile(name, phone),
+      fallback: () => setUser({ ...user, name, phone }),
+      errorMessage: 'Could not save profile changes.',
+    });
+    setIsEditingProfile(false);
+  };
+
+  const handleToggleNotifications = async () => {
+    const nextValue = !settings.notificationsEnabled;
+    await runMutation({
+      request: () => patchSettings({ notificationsEnabled: nextValue }),
+      fallback: () => setSettings((prev) => ({ ...prev, notificationsEnabled: nextValue })),
+      errorMessage: 'Could not update notification preferences.',
+    });
+  };
+
+  const handleToggleDarkMode = async () => {
+    const nextValue = !settings.darkMode;
+    await runMutation({
+      request: () => patchSettings({ darkMode: nextValue }),
+      fallback: () => setSettings((prev) => ({ ...prev, darkMode: nextValue })),
+      errorMessage: 'Could not update theme preference.',
+    });
   };
 
   const renderLogin = () => (
@@ -557,6 +596,7 @@ export default function StratosApp() {
           </h1>
           <p className="text-on-surface-variant font-body text-lg">Secure access to your professional workspace.</p>
         </div>
+        {mutationBanner}
         <div className="surface-container-lowest glass-panel rounded-xl p-8 lg:p-10 shadow-[0px_20px_40px_rgba(7,30,39,0.06)] border border-white/40">
           <form className="space-y-6" onSubmit={handleLogin}>
             <div className="space-y-2">
@@ -607,7 +647,7 @@ export default function StratosApp() {
   );
 
   const renderDashboard = () => (
-    <Layout currentScreen="dashboard" onNavigate={navigateTo} user={user}>
+    <Layout currentScreen="dashboard" onNavigate={navigateTo} user={user} banner={mutationBanner}>
       <section className="mb-10 pt-4">
         <h2 className="font-headline font-extrabold text-[3.5rem] leading-[1.1] text-primary tracking-tight mb-2">
           Good Morning,
@@ -677,7 +717,7 @@ export default function StratosApp() {
   );
 
   const renderHistory = () => (
-    <Layout currentScreen="history" onNavigate={navigateTo} user={user} title="Recent Shifts">
+    <Layout currentScreen="history" onNavigate={navigateTo} user={user} title="Recent Shifts" banner={mutationBanner}>
       <div className="flex justify-between items-center mb-6">
         <h2 className="font-headline text-2xl font-bold text-primary">Recent Shifts</h2>
         <span className="text-on-surface-variant font-label text-sm font-medium">Latest {shifts.length} records</span>
@@ -691,7 +731,7 @@ export default function StratosApp() {
   );
 
   const renderSchedule = () => (
-    <Layout currentScreen="schedule" onNavigate={navigateTo} user={user} title="Weekly Schedule">
+    <Layout currentScreen="schedule" onNavigate={navigateTo} user={user} title="Weekly Schedule" banner={mutationBanner}>
       <section className="mt-4 mb-8 overflow-x-auto no-scrollbar">
         <div className="flex gap-2 pb-2">
           {upcomingShifts.map((shift, index) => {
@@ -764,7 +804,7 @@ export default function StratosApp() {
   );
 
   const renderTimeOff = () => (
-    <Layout currentScreen="time-off" onNavigate={navigateTo} user={user} title="Time Off">
+    <Layout currentScreen="time-off" onNavigate={navigateTo} user={user} title="Time Off" banner={mutationBanner}>
       <section className="mb-10">
         <p className="font-headline text-on-surface-variant font-medium tracking-wide mb-1">YOUR BALANCES</p>
         <h2 className="font-headline text-primary font-extrabold text-4xl tracking-tighter">Plan your next break.</h2>
@@ -813,7 +853,7 @@ export default function StratosApp() {
   );
 
   const renderNewRequest = () => (
-    <Layout currentScreen="time-off" onNavigate={navigateTo} user={user} title="New Request" showBottomBar={false}>
+    <Layout currentScreen="time-off" onNavigate={navigateTo} user={user} title="New Request" showBottomBar={false} banner={mutationBanner}>
       <section className="mb-10">
         <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary to-primary-container p-8 text-white shadow-lg">
           <div className="relative z-10">
@@ -897,7 +937,7 @@ export default function StratosApp() {
   );
 
   const renderRequestSubmitted = () => (
-    <Layout currentScreen="dashboard" onNavigate={navigateTo} user={user} title="Request Submitted" showBottomBar={false}>
+    <Layout currentScreen="dashboard" onNavigate={navigateTo} user={user} title="Request Submitted" showBottomBar={false} banner={mutationBanner}>
       <div className="relative overflow-hidden bg-surface-container-low rounded-xl p-8 md:p-16 text-center">
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-secondary-container/20 rounded-full blur-3xl"></div>
         <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-primary-container/10 rounded-full blur-3xl"></div>
@@ -946,7 +986,7 @@ export default function StratosApp() {
         return renderRequestSubmitted();
       case 'alerts':
         return (
-          <Layout currentScreen="alerts" onNavigate={navigateTo} user={user} title="Notifications">
+          <Layout currentScreen="alerts" onNavigate={navigateTo} user={user} title="Notifications" banner={mutationBanner}>
             <div className="mb-10">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-headline font-extrabold text-primary tracking-tight text-xl">New</h2>
@@ -970,7 +1010,7 @@ export default function StratosApp() {
         );
       case 'profile':
         return (
-          <Layout currentScreen="profile" onNavigate={navigateTo} user={user} title="Profile">
+          <Layout currentScreen="profile" onNavigate={navigateTo} user={user} title="Profile" banner={mutationBanner}>
             <section className="relative bg-surface-container-lowest rounded-xl p-8 flex flex-col items-center text-center overflow-hidden border border-outline-variant/10">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16"></div>
               <div className="relative w-28 h-28 rounded-xl overflow-hidden mb-4 shadow-lg ring-4 ring-surface-container">
@@ -998,7 +1038,7 @@ export default function StratosApp() {
                 ) : (
                   <div className="flex gap-4">
                     <button type="button" onClick={() => setIsEditingProfile(false)} className="text-sm font-semibold text-on-surface-variant hover:underline transition-all">Cancel</button>
-                    <button type="button" onClick={() => { setUser({ ...user, name: editForm.name.trim() || user.name, phone: editForm.phone.trim() || user.phone }); setIsEditingProfile(false); }} className="text-sm font-bold text-secondary hover:underline transition-all">Save Changes</button>
+                    <button type="button" onClick={handleSaveProfile} className="text-sm font-bold text-secondary hover:underline transition-all">Save Changes</button>
                   </div>
                 )}
               </div>
@@ -1027,7 +1067,7 @@ export default function StratosApp() {
             <section className="space-y-4 mt-8">
               <h3 className="text-lg font-bold text-primary tracking-tight px-2">App Settings</h3>
               <div className="bg-surface-container-highest/30 backdrop-blur-md rounded-xl divide-y divide-outline-variant/10 border border-white/20">
-                <button type="button" onClick={() => setSettings((prev) => ({ ...prev, notificationsEnabled: !prev.notificationsEnabled }))} className="w-full flex items-center justify-between p-5 hover:bg-surface-container-low transition-colors group text-left">
+                <button type="button" onClick={handleToggleNotifications} className="w-full flex items-center justify-between p-5 hover:bg-surface-container-low transition-colors group text-left">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shadow-sm">
                       <Bell className="text-primary" size={20} />
@@ -1041,7 +1081,7 @@ export default function StratosApp() {
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.notificationsEnabled ? 'right-1' : 'left-1'}`}></div>
                   </div>
                 </button>
-                <button type="button" onClick={() => setSettings((prev) => ({ ...prev, darkMode: !prev.darkMode }))} className="w-full flex items-center justify-between p-5 hover:bg-surface-container-low transition-colors group text-left">
+                <button type="button" onClick={handleToggleDarkMode} className="w-full flex items-center justify-between p-5 hover:bg-surface-container-low transition-colors group text-left">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shadow-sm">
                       <Moon className="text-primary" size={20} />

@@ -21,4 +21,4 @@ View your app in AI Studio: https://ai.studio/apps/2d1049f3-0ba3-412c-b7aa-a50e7
 4. Start the Vite app in a second terminal:
    `npm run dev:client`
 
-The front end will use `/api/state` when the local API is available and fall back to browser storage when it is not.
+The front end hydrates from `GET /api/state`, sends targeted mutations to the local API when it is available, and falls back to browser storage when it is not.

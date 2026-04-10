@@ -24,6 +24,16 @@ export interface CreateTimeOffRequestInput {
   notes?: string;
 }
 
+export interface UpdateUserProfileInput {
+  name: string;
+  phone: string;
+}
+
+export interface UpdateSettingsInput {
+  notificationsEnabled?: boolean;
+  darkMode?: boolean;
+}
+
 function normalizeState(candidate: Partial<PersistedState> | null | undefined): PersistedState {
   const defaults = createDefaultAppState();
   return {
@@ -783,6 +793,95 @@ export async function createTimeOffRequest(input: CreateTimeOffRequestInput): Pr
         label: 'View Requests',
         type: 'view',
         targetScreen: 'time-off',
+      },
+    });
+  });
+
+  return hydrateNormalizedState(db);
+}
+
+export async function updateSessionAuth(isAuthenticated: boolean): Promise<PersistedState> {
+  const db = await ensureDatabase();
+  db.prepare(
+    `INSERT INTO app_session (id, is_authenticated, last_submitted_request_id)
+     VALUES (
+       1,
+       ?,
+       COALESCE((SELECT last_submitted_request_id FROM app_session WHERE id = 1), NULL)
+     )
+     ON CONFLICT(id) DO UPDATE SET is_authenticated = excluded.is_authenticated`,
+  ).run(isAuthenticated ? 1 : 0);
+
+  return hydrateNormalizedState(db);
+}
+
+export async function updateUserProfile(input: UpdateUserProfileInput): Promise<PersistedState> {
+  const db = await ensureDatabase();
+  const name = input.name.trim();
+  const phone = input.phone.trim();
+
+  if (!name || !phone) {
+    throw new Error('name and phone are required.');
+  }
+
+  const existing = db.prepare(
+    'SELECT employee_id, email, photo_url FROM user_profile WHERE id = 1',
+  ).get() as { employee_id: string; email: string; photo_url: string } | undefined;
+
+  if (!existing) {
+    throw new Error('User profile not initialized.');
+  }
+
+  db.prepare(
+    `INSERT INTO user_profile (id, name, employee_id, email, phone, photo_url)
+     VALUES (1, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, phone = excluded.phone`,
+  ).run(name, existing.employee_id, existing.email, phone, existing.photo_url);
+
+  return hydrateNormalizedState(db);
+}
+
+export async function updateAppSettings(input: UpdateSettingsInput): Promise<PersistedState> {
+  const db = await ensureDatabase();
+  const current = db.prepare(
+    'SELECT notifications_enabled, dark_mode FROM app_settings WHERE id = 1',
+  ).get() as { notifications_enabled: number; dark_mode: number } | undefined;
+
+  if (!current) {
+    throw new Error('App settings not initialized.');
+  }
+
+  const notificationsEnabled =
+    typeof input.notificationsEnabled === 'boolean' ? input.notificationsEnabled : current.notifications_enabled === 1;
+  const darkMode = typeof input.darkMode === 'boolean' ? input.darkMode : current.dark_mode === 1;
+
+  db.prepare(
+    `INSERT INTO app_settings (id, notifications_enabled, dark_mode)
+     VALUES (1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       notifications_enabled = excluded.notifications_enabled,
+       dark_mode = excluded.dark_mode`,
+  ).run(notificationsEnabled ? 1 : 0, darkMode ? 1 : 0);
+
+  return hydrateNormalizedState(db);
+}
+
+export async function createShiftSwapDraft(): Promise<PersistedState> {
+  const db = await ensureDatabase();
+  const notificationId = `notification-${Date.now()}`;
+
+  execTransaction(db, () => {
+    insertNotificationAtTop(db, {
+      id: notificationId,
+      type: 'update',
+      title: 'Shift Swap Drafted',
+      message: 'A shift swap request draft is ready for manager review.',
+      time: NOW_LABEL,
+      unread: true,
+      action: {
+        label: 'View Schedule',
+        type: 'open',
+        targetScreen: 'schedule',
       },
     });
   });

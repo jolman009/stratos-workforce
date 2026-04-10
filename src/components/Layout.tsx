@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 
 interface LayoutProps {
   children: ReactNode;
+  banner?: ReactNode;
   currentScreen: Screen;
   onNavigate: (screen: Screen) => void;
   user?: {
@@ -18,6 +19,7 @@ interface LayoutProps {
 
 export default function Layout({ 
   children, 
+  banner,
   currentScreen, 
   onNavigate, 
   user, 
@@ -69,6 +71,7 @@ export default function Layout({
           transition={{ duration: 0.3 }}
           key={currentScreen}
         >
+          {banner}
           {children}
         </motion.div>
       </main>
